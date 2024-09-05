@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/stripe/stripe-go/v79"
+	"github.com/stripe/stripe-go/v79/paymentmethod"
 	"github.com/urfave/cli/v2"
 )
 
@@ -15,6 +17,7 @@ func initCliApp() *cli.App {
 			&cli.StringFlag{Name: "api-key", Usage: "Your Stripe API key", EnvVars: []string{"STRIPE_API_KEY"}},
 			&cli.StringFlag{Name: "from", Usage: "Start date of the export in UTC, format 2006-01-02 15:04"},
 			&cli.StringFlag{Name: "to", Usage: "End date of the export in UTC, format 2006-01-02 15:04"},
+			&cli.StringFlag{Name: "expand", Usage: "Fields to expand in the invoice search, comma-separated"},
 			&cli.StringFlag{Name: "out-dir", Usage: "The output directory where the downloaded invoices are stored", Value: "out"},
 		},
 		Action: func(cCtx *cli.Context) error {
@@ -29,12 +32,31 @@ func initCliApp() *cli.App {
 				return fmt.Errorf("error parsing to: %w", err)
 			}
 
-			invoices, err := searchInvoices(*from, *to)
+			expand := parseExpandFlag(cCtx.String("expand"))
+
+			invoices, err := searchInvoices(*from, *to, expand)
 			if err != nil {
 				return fmt.Errorf("error searching invoices: %w", err)
 			}
 
-			if err := downloadInvoices(invoices, cCtx.String("out-dir")); err != nil {
+			var sepaInvoice []*stripe.Invoice
+			for _, inv := range invoices {
+				if inv.Charge != nil {
+					pm, err := paymentmethod.Get(inv.Charge.PaymentMethod, nil)
+					if err != nil {
+						fmt.Printf("Error fetching PaymentMethod: %v\n", err)
+						continue
+					}
+					fmt.Printf("Invoice ID: %s, PaymentMethod: %s\n", inv.ID, pm.Type)
+					if pm.Type == "sepa_debit" {
+						sepaInvoice = append(sepaInvoice, inv)
+					}
+				} else {
+					fmt.Printf("Invoice ID: %s, No Charge associated\n", inv.ID)
+				}
+			}
+
+			if err := downloadInvoices(sepaInvoice, cCtx.String("out-dir")); err != nil {
 				return fmt.Errorf("error downloading invoices: %w", err)
 			}
 
@@ -54,4 +76,16 @@ func timeFlagValue(v string) (*time.Time, error) {
 	}
 
 	return &t, nil
+}
+
+func parseExpandFlag(expand string) []*string {
+	if expand == "" {
+		return nil
+	}
+	fields := strings.Split(expand, ",")
+	expandFields := make([]*string, len(fields))
+	for i, field := range fields {
+		expandFields[i] = &field
+	}
+	return expandFields
 }

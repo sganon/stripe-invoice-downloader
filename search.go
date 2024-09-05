@@ -8,8 +8,9 @@ import (
 	"github.com/stripe/stripe-go/v79/invoice"
 )
 
-func searchInvoices(start, end time.Time) ([]*stripe.Invoice, error) {
+func searchInvoices(start, end time.Time, expand []*string) ([]*stripe.Invoice, error) {
 	params := &stripe.InvoiceSearchParams{
+		Expand:       expand,
 		SearchParams: stripe.SearchParams{Query: fmt.Sprintf("created>%d AND created<%d AND status:\"%s\"", start.Unix(), end.Unix(), stripe.InvoiceStatusPaid)},
 	}
 	result := invoice.Search(params)
